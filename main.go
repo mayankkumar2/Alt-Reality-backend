@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"github.com/TeamRekursion/Alt-Reality-backend/participant"
 	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/room"
 	"github.com/go-redis/redis/v8"
@@ -18,6 +20,8 @@ var upgrader = websocket.Upgrader{}
 var redisClient *redis.Client
 
 func main() {
+	// TODO: Put content-type checks
+	// TODO: Code refactor to hexagon
 	// TODO: move to .env
 	redisClient = redis.NewClient(&redis.Options{
 		Addr: "0.0.0.0:6379",
@@ -55,7 +59,7 @@ func main() {
 				return
 			}
 
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ =json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
 				"message": "created a room",
 				"body":    room,
@@ -107,28 +111,176 @@ func main() {
 	})
 
 	router.HandleFunc("/rooms/broadcast/receive", func(w http.ResponseWriter, r *http.Request) {
-		_, err := upgrader.Upgrade(w, r, nil)
+		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade:", err)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   false,
-			"message": "joined a room",
-			"room_id": "ID",
+		initPayload := struct {
+			RoomID uuid.UUID `json:"room_id"`
+			participantID uuid.UUID `json:"participant_id"`
+		}{}
+
+		err = c.ReadJSON(initPayload)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{} {
+				"error": true,
+				"message": "room_id or participant_id is not a valid UUID",
+			})
+			_ = c.Close()
+			return
+		}
+		key := initPayload.RoomID.String() + ":Room"
+		roomCmd := redisClient.Get(context.Background(), key)
+
+		var room roomPkg.Room
+		err = roomCmd.Scan(&room)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "room_id doesn't exist",
+			})
+			_ = c.Close()
+			return
+		}
+
+		var doesExist = false
+		for _, e := range room.Participants {
+			if e.ParticipantID == initPayload.participantID {
+				doesExist = true
+			}
+		}
+
+		if !doesExist {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "you must join the channel first",
+			})
+			_ = c.Close()
+			return
+		}
+
+
+		room.AddActiveParticipant(initPayload.participantID)
+		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
+		if err != nil {
+			_ = c.Close()
+			return
+		}
+
+		_ = c.WriteJSON(map[string]interface{} {
+			"message": "user set as active",
 		})
+
+		channelKey := key + ":CHANNEL"
+		msg := redisClient.Subscribe(context.Background(), channelKey).Channel()
+		var breakFlag = false
+		for {
+			select {
+			case m := <- msg:
+				fmt.Println(m)
+			case _ = <- r.Context().Done():
+				breakFlag = true
+			}
+			if breakFlag {
+				break
+			}
+		}
+		room.RemoveActiveParticipant(initPayload.participantID)
+		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
+		if err != nil {
+			_ = c.Close()
+			return
+		}
 	})
 	router.HandleFunc("/rooms/broadcast/send", func(w http.ResponseWriter, r *http.Request) {
-		_, err := upgrader.Upgrade(w, r, nil)
+		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade:", err)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"error":   false,
-			"message": "joined a room",
-			"room_id": "ID",
+		initPayload := struct {
+			RoomID uuid.UUID `json:"room_id"`
+			participantID uuid.UUID `json:"participant_id"`
+		}{}
+
+		err = c.ReadJSON(initPayload)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{} {
+				"error": true,
+				"message": "room_id or participant_id is not a valid UUID",
+			})
+			_ = c.Close()
+			return
+		}
+		key := initPayload.RoomID.String() + ":Room"
+		roomCmd := redisClient.Get(context.Background(), key)
+
+		var room roomPkg.Room
+		err = roomCmd.Scan(&room)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "room_id doesn't exist",
+			})
+			_ = c.Close()
+			return
+		}
+
+		var doesExist = false
+		for _, e := range room.Participants {
+			if e.ParticipantID == initPayload.participantID {
+				doesExist = true
+			}
+		}
+
+		if !doesExist {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "you must join the channel first",
+			})
+			_ = c.Close()
+			return
+		}
+
+
+		room.AddActiveParticipant(initPayload.participantID)
+		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
+		if err != nil {
+			_ = c.Close()
+			return
+		}
+
+		_ = c.WriteJSON(map[string]interface{} {
+			"message": "user set as active",
 		})
+
+
+		channelKey := key + ":CHANNEL"
+		for {
+			message := struct {
+				AtX float64 `json:"at_x"`
+				AtY float64 `json:"at_y"`
+			}{}
+			err = c.ReadJSON(message)
+			if err != nil {
+				break
+			}
+
+			var b bytes.Buffer
+			_ = json.NewEncoder(&b).Encode(message)
+			_ = redisClient.Publish(r.Context(), channelKey, string(b.Bytes())).Err()
+		}
+
+		room.RemoveActiveParticipant(initPayload.participantID)
+		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
+		if err != nil {
+			_ = c.Close()
+			return
+		}
+
+
+
 	})
 
 	router.HandleFunc("/rooms/info", func(w http.ResponseWriter, r *http.Request) {
