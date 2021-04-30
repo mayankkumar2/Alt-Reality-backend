@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/TeamRekursion/Alt-Reality-backend/participant"
-	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/room"
+	participantPkg "github.com/TeamRekursion/Alt-Reality-backend/models/participant"
+	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/models/room"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -58,7 +58,7 @@ func main() {
 				return
 			}
 
-			_ =json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
 				"message": "created a room",
 				"body":    room,
@@ -88,7 +88,7 @@ func main() {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
-			p := participant.CreateParticipant()
+			p := participantPkg.CreateParticipant()
 			room.AddParticipants(p)
 			err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 			if err != nil {
@@ -122,8 +122,8 @@ func main() {
 
 		err = c.ReadJSON(&initPayload)
 		if err != nil {
-			_ = c.WriteJSON(map[string]interface{} {
-				"error": true,
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
 				"message": "room_id or participant_id is not a valid UUID",
 			})
 			_ = c.Close()
@@ -159,7 +159,6 @@ func main() {
 			return
 		}
 
-
 		room.AddActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
@@ -167,7 +166,7 @@ func main() {
 			return
 		}
 
-		_ = c.WriteJSON(map[string]interface{} {
+		_ = c.WriteJSON(map[string]interface{}{
 			"message": "user set as active",
 		})
 
@@ -176,12 +175,12 @@ func main() {
 		var breakFlag = false
 		for {
 			select {
-			case m := <- msg:
+			case m := <-msg:
 				err = c.WriteMessage(1, []byte(m.Payload))
 				if err != nil {
 					breakFlag = true
 				}
-			case _ = <- r.Context().Done():
+			case _ = <-r.Context().Done():
 				breakFlag = true
 			}
 			if breakFlag {
@@ -209,8 +208,8 @@ func main() {
 
 		err = c.ReadJSON(&initPayload)
 		if err != nil {
-			_ = c.WriteJSON(map[string]interface{} {
-				"error": true,
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
 				"message": "room_id or participant_id is not a valid UUID",
 			})
 			_ = c.Close()
@@ -246,7 +245,6 @@ func main() {
 			return
 		}
 
-
 		room.AddActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
@@ -254,10 +252,9 @@ func main() {
 			return
 		}
 
-		_ = c.WriteJSON(map[string]interface{} {
+		_ = c.WriteJSON(map[string]interface{}{
 			"message": "user set as active",
 		})
-
 
 		channelKey := key + ":CHANNEL"
 		for {
@@ -271,7 +268,10 @@ func main() {
 			}
 
 			var b bytes.Buffer
-			_ = json.NewEncoder(&b).Encode(message)
+			_ = json.NewEncoder(&b).Encode(map[string] interface{}{
+				"co_ordinates": message,
+				"participant_id": initPayload.ParticipantID,
+			})
 			_ = redisClient.Publish(r.Context(), channelKey, string(b.Bytes())).Err()
 		}
 
@@ -281,8 +281,6 @@ func main() {
 			_ = c.Close()
 			return
 		}
-
-
 
 	})
 
@@ -310,9 +308,8 @@ func main() {
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
 				"message": "team info",
-				"body": room,
+				"body":    room,
 			})
-
 
 		} else {
 			w.WriteHeader(http.StatusNotFound)
