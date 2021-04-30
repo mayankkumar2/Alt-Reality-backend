@@ -5,6 +5,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// TODO: use a BST Tree implementation for fast addition and removal of active users
+// TODO: use a SET Data structure indexed with ParticipantID for fast updates of user coordinates
+
 type Room struct {
 	RoomID       uuid.UUID                    `json:"room_id"`
 	Name         string                       `json:"name"`
