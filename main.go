@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/TeamRekursion/Alt-Reality-backend/participant"
 	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/room"
 	"github.com/go-redis/redis/v8"
@@ -97,7 +96,7 @@ func main() {
 				return
 			}
 
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
 				"message": "joined a room",
 				"body": map[string]interface{}{
@@ -117,11 +116,11 @@ func main() {
 			return
 		}
 		initPayload := struct {
-			RoomID uuid.UUID `json:"room_id"`
-			participantID uuid.UUID `json:"participant_id"`
+			RoomID        uuid.UUID `json:"room_id"`
+			ParticipantID uuid.UUID `json:"participant_id"`
 		}{}
 
-		err = c.ReadJSON(initPayload)
+		err = c.ReadJSON(&initPayload)
 		if err != nil {
 			_ = c.WriteJSON(map[string]interface{} {
 				"error": true,
@@ -146,7 +145,7 @@ func main() {
 
 		var doesExist = false
 		for _, e := range room.Participants {
-			if e.ParticipantID == initPayload.participantID {
+			if e.ParticipantID == initPayload.ParticipantID {
 				doesExist = true
 			}
 		}
@@ -161,7 +160,7 @@ func main() {
 		}
 
 
-		room.AddActiveParticipant(initPayload.participantID)
+		room.AddActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
@@ -178,7 +177,10 @@ func main() {
 		for {
 			select {
 			case m := <- msg:
-				fmt.Println(m)
+				err = c.WriteMessage(1, []byte(m.Payload))
+				if err != nil {
+					breakFlag = true
+				}
 			case _ = <- r.Context().Done():
 				breakFlag = true
 			}
@@ -186,7 +188,7 @@ func main() {
 				break
 			}
 		}
-		room.RemoveActiveParticipant(initPayload.participantID)
+		room.RemoveActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
@@ -194,17 +196,18 @@ func main() {
 		}
 	})
 	router.HandleFunc("/rooms/broadcast/send", func(w http.ResponseWriter, r *http.Request) {
+		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade:", err)
 			return
 		}
 		initPayload := struct {
-			RoomID uuid.UUID `json:"room_id"`
-			participantID uuid.UUID `json:"participant_id"`
+			RoomID        uuid.UUID `json:"room_id"`
+			ParticipantID uuid.UUID `json:"participant_id"`
 		}{}
 
-		err = c.ReadJSON(initPayload)
+		err = c.ReadJSON(&initPayload)
 		if err != nil {
 			_ = c.WriteJSON(map[string]interface{} {
 				"error": true,
@@ -229,7 +232,7 @@ func main() {
 
 		var doesExist = false
 		for _, e := range room.Participants {
-			if e.ParticipantID == initPayload.participantID {
+			if e.ParticipantID == initPayload.ParticipantID {
 				doesExist = true
 			}
 		}
@@ -244,7 +247,7 @@ func main() {
 		}
 
 
-		room.AddActiveParticipant(initPayload.participantID)
+		room.AddActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
@@ -262,7 +265,7 @@ func main() {
 				AtX float64 `json:"at_x"`
 				AtY float64 `json:"at_y"`
 			}{}
-			err = c.ReadJSON(message)
+			err = c.ReadJSON(&message)
 			if err != nil {
 				break
 			}
@@ -272,7 +275,7 @@ func main() {
 			_ = redisClient.Publish(r.Context(), channelKey, string(b.Bytes())).Err()
 		}
 
-		room.RemoveActiveParticipant(initPayload.participantID)
+		room.RemoveActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()

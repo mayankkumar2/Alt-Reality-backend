@@ -39,13 +39,13 @@ func (r *Room) AddActiveParticipant(p ...uuid.UUID) {
 }
 
 func (r *Room) RemoveActiveParticipant(pID uuid.UUID) {
-	f := -1
-	for i, e := range r.Active {
-		if e == pID {
-			f = i
+	f := make([]uuid.UUID, 0, len(r.Active))
+	for _, e := range r.Active {
+		if e != pID {
+			f = append(f, e)
 		}
 	}
-	r.Active = append(r.Active[:f], r.Active[f+1:]...)
+	r.Active = f
 }
 
 func CreateRoom(n string, offer string) Room {
