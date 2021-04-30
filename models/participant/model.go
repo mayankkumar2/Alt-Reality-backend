@@ -7,11 +7,3 @@ type Participant struct {
 	AtX           float64   `json:"at_x"`
 	AtY           float64   `json:"at_y"`
 }
-
-func CreateParticipant() Participant {
-	return Participant{
-		ParticipantID: uuid.New(),
-		AtX:           -1,
-		AtY:           -1,
-	}
-}
