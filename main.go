@@ -4,16 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	participantPkg "github.com/TeamRekursion/Alt-Reality-backend/models/participant"
 	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/models/room"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
+	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	"github.com/rs/cors"
 	"log"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 )
+
+var redisSafeUp sync.Mutex
 
 var upgrader = websocket.Upgrader{}
 var redisClient *redis.Client
@@ -80,12 +87,13 @@ func main() {
 				return
 			}
 			key := reqBody.RoomID.String() + ":Room"
+			redisSafeUp.Lock()
 			roomCmd := redisClient.Get(context.Background(), key)
-
 			var room roomPkg.Room
 			err = roomCmd.Scan(&room)
 			if err != nil {
 				w.WriteHeader(http.StatusNotFound)
+				redisSafeUp.Unlock()
 				return
 			}
 			p := participantPkg.CreateParticipant()
@@ -93,8 +101,10 @@ func main() {
 			err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
+				redisSafeUp.Unlock()
 				return
 			}
+			redisSafeUp.Unlock()
 
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
@@ -110,6 +120,7 @@ func main() {
 	})
 
 	router.HandleFunc("/rooms/broadcast/receive", func(w http.ResponseWriter, r *http.Request) {
+		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			log.Print("upgrade:", err)
@@ -130,6 +141,8 @@ func main() {
 			return
 		}
 		key := initPayload.RoomID.String() + ":Room"
+
+		redisSafeUp.Lock()
 		roomCmd := redisClient.Get(context.Background(), key)
 
 		var room roomPkg.Room
@@ -140,6 +153,7 @@ func main() {
 				"message": "room_id doesn't exist",
 			})
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
 
@@ -156,6 +170,7 @@ func main() {
 				"message": "you must join the channel first",
 			})
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
 
@@ -163,8 +178,10 @@ func main() {
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
+		redisSafeUp.Unlock()
 
 		_ = c.WriteJSON(map[string]interface{}{
 			"message": "user set as active",
@@ -187,12 +204,26 @@ func main() {
 				break
 			}
 		}
+		redisSafeUp.Lock()
+		err = roomCmd.Scan(&room)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "room_id doesn't exist",
+			})
+			_ = c.Close()
+			redisSafeUp.Unlock()
+			return
+		}
 		room.RemoveActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
+		redisSafeUp.Unlock()
+
 	})
 	router.HandleFunc("/rooms/broadcast/send", func(w http.ResponseWriter, r *http.Request) {
 		upgrader.CheckOrigin = func(r *http.Request) bool { return true }
@@ -217,7 +248,7 @@ func main() {
 		}
 		key := initPayload.RoomID.String() + ":Room"
 		roomCmd := redisClient.Get(context.Background(), key)
-
+		redisSafeUp.Lock()
 		var room roomPkg.Room
 		err = roomCmd.Scan(&room)
 		if err != nil {
@@ -225,7 +256,9 @@ func main() {
 				"error":   true,
 				"message": "room_id doesn't exist",
 			})
+			fmt.Println(err)
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
 
@@ -242,15 +275,18 @@ func main() {
 				"message": "you must join the channel first",
 			})
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
-
 		room.AddActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
+		redisSafeUp.Unlock()
+
 
 		_ = c.WriteJSON(map[string]interface{}{
 			"message": "user set as active",
@@ -273,14 +309,28 @@ func main() {
 				"participant_id": initPayload.ParticipantID,
 			})
 			_ = redisClient.Publish(r.Context(), channelKey, string(b.Bytes())).Err()
+			go HandlePositionUpdates(initPayload.RoomID, initPayload.ParticipantID, message.AtX, message.AtY)
 		}
-
+		redisSafeUp.Lock()
+		err = roomCmd.Scan(&room)
+		if err != nil {
+			_ = c.WriteJSON(map[string]interface{}{
+				"error":   true,
+				"message": "room_id doesn't exist",
+			})
+			_ = c.Close()
+			redisSafeUp.Unlock()
+			return
+		}
 		room.RemoveActiveParticipant(initPayload.ParticipantID)
 		err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 		if err != nil {
 			_ = c.Close()
+			redisSafeUp.Unlock()
 			return
 		}
+		redisSafeUp.Unlock()
+
 
 	})
 
@@ -316,8 +366,34 @@ func main() {
 		}
 	})
 
-	err = http.ListenAndServe("0.0.0.0:8080", router)
+	corsMiddleware := cors.Default()
+	loggerMiddleware := handlers.LoggingHandler(os.Stdout, corsMiddleware.Handler(router))
+	log.Println("Binding to.. 0.0.0.0:" + os.Getenv("PORT"))
+	err = http.ListenAndServe("0.0.0.0:" + os.Getenv("PORT"), loggerMiddleware)
 	if err != nil {
-		log.Fatalln("Error occurred in binding to port 8080")
+		log.Fatalln("Error occurred in binding to port " + os.Getenv("PORT"))
+	}
+}
+
+func HandlePositionUpdates(rID uuid.UUID, participantID uuid.UUID, AtX float64, AtY float64) {
+	key := rID.String() + ":Room"
+	var room roomPkg.Room
+
+	redisSafeUp.Lock()
+	defer redisSafeUp.Unlock()
+	roomCmd := redisClient.Get(context.Background(), key)
+	err := roomCmd.Scan(&room)
+	if err != nil {
+		return
+	}
+	for i, e := range room.Participants {
+		if e.ParticipantID == participantID {
+			room.Participants[i].AtX = AtX
+			room.Participants[i].AtY = AtY
+		}
+	}
+	err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
+	if err != nil {
+		return
 	}
 }
