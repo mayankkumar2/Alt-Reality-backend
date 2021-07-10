@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	participantPkg "github.com/TeamRekursion/Alt-Reality-backend/models/participant"
-	roomPkg "github.com/TeamRekursion/Alt-Reality-backend/models/room"
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
+	participantPkg "github.com/mayankkumar2/Alt-Reality-backend/models/participant"
+	roomPkg "github.com/mayankkumar2/Alt-Reality-backend/models/room"
 	"github.com/rs/cors"
 	"log"
 	"net/http"
@@ -42,29 +42,23 @@ func main() {
 
 	router.HandleFunc("/rooms/create", func(w http.ResponseWriter, r *http.Request) {
 		if http.MethodPost == r.Method {
-
 			reqBody := struct {
 				OfferStr string `json:"offer_str"`
 				Name     string `json:"name"`
 			}{}
-
 			err := json.NewDecoder(r.Body).Decode(&reqBody)
 			if err != nil || reqBody.Name == "" || reqBody.OfferStr == "" {
 				w.WriteHeader(http.StatusBadRequest)
 				return
 			}
-
 			room := roomPkg.CreateRoom(reqBody.Name, reqBody.OfferStr)
-
 			key := room.RoomID.String() + ":Room"
-
 			err = redisClient.Set(context.Background(), key, room, time.Hour).Err()
 			if err != nil {
 				log.Println(err)
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"error":   false,
 				"message": "created a room",

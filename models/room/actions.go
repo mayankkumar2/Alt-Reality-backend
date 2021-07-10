@@ -2,8 +2,8 @@ package room
 
 import (
 	"encoding/json"
-	participantPkg "github.com/TeamRekursion/Alt-Reality-backend/models/participant"
 	"github.com/google/uuid"
+	participantPkg "github.com/mayankkumar2/Alt-Reality-backend/models/participant"
 	"time"
 )
 
@@ -53,4 +53,3 @@ func CreateRoom(n string, offer string) Room {
 		Active:       ac,
 	}
 }
-

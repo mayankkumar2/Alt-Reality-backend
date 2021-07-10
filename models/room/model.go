@@ -1,8 +1,8 @@
 package room
 
 import (
-	participantPkg "github.com/TeamRekursion/Alt-Reality-backend/models/participant"
 	"github.com/google/uuid"
+	participantPkg "github.com/mayankkumar2/Alt-Reality-backend/models/participant"
 )
 
 // TODO: use a BST Tree implementation for fast addition and removal of active users
@@ -16,5 +16,3 @@ type Room struct {
 	StartedAt    int64                        `json:"started_at"`
 	Active       []uuid.UUID                  `json:"active"`
 }
-
-
